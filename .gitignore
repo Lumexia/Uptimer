@@ -1,10 +1,4 @@
-# Local docs (project planning/spec) - keep out of git history
-/Application.md
-/Structure.md
-/Plan.md
-/AGENTS.md
-/API-Reference.md
-/LOCAL-TESTING.md
+# Project docs are tracked (do not ignore specs)
 
 # Dependencies
 node_modules
