@@ -300,7 +300,7 @@ jobs:
 
 
       - name: Warm public status snapshot (best-effort)
-        if: ${{ steps.deploy_worker.outputs.worker_url != "" }}
+        if: ${{ steps.deploy_worker.outputs.worker_url != '' }}
         shell: bash
         run: |
           set +e
