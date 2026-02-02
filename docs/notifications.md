@@ -39,8 +39,8 @@ Uptimer 的通知系统目标：
 - `incident.created`
 - `incident.updated`
 - `incident.resolved`
-- `maintenance.started`（目前可能尚未实际触发）
-- `maintenance.ended`（目前可能尚未实际触发）
+- `maintenance.started`
+- `maintenance.ended`
 - `test.ping`（用于测试按钮）
 
 ### 2.2 Event Key / Event ID（幂等键）

@@ -24,6 +24,9 @@ const LOCK_LEASE_SECONDS = 55;
 
 const CHECK_CONCURRENCY = 5;
 
+// Look back a bit so maintenance start/end notifications are not missed if a tick is delayed.
+const MAINTENANCE_EVENT_LOOKBACK_SECONDS = 10 * 60;
+
 type DueMonitorRow = {
   id: number;
   name: string;
@@ -48,19 +51,22 @@ type ActiveWebhookChannelRow = {
   id: number;
   name: string;
   config_json: string;
+  created_at: number;
 };
+
+type WebhookChannelWithMeta = WebhookChannel & { created_at: number };
 
 type NotifyContext = {
   ctx: ExecutionContext;
   envRecord: Record<string, unknown>;
-  channels: WebhookChannel[];
+  channels: WebhookChannelWithMeta[];
 };
 
-async function listActiveWebhookChannels(db: D1Database): Promise<WebhookChannel[]> {
+async function listActiveWebhookChannels(db: D1Database): Promise<WebhookChannelWithMeta[]> {
   const { results } = await db
     .prepare(
       `
-      SELECT id, name, config_json
+      SELECT id, name, config_json, created_at
       FROM notification_channels
       WHERE is_active = 1 AND type = 'webhook'
       ORDER BY id
@@ -72,6 +78,7 @@ async function listActiveWebhookChannels(db: D1Database): Promise<WebhookChannel
     id: r.id,
     name: r.name,
     config: parseDbJson(webhookChannelConfigSchema, r.config_json, { field: 'config_json' }),
+    created_at: r.created_at,
   }));
 }
 
@@ -94,6 +101,103 @@ async function listMaintenanceSuppressedMonitorIds(
 
   const { results } = await db.prepare(sql).bind(at, ...ids).all<{ monitor_id: number }>();
   return new Set((results ?? []).map((r) => r.monitor_id));
+}
+
+// Maintenance notification helpers (scheduled emits maintenance.started / maintenance.ended).
+
+type MaintenanceWindowRow = {
+  id: number;
+  title: string;
+  message: string | null;
+  starts_at: number;
+  ends_at: number;
+  created_at: number;
+};
+
+type MaintenanceWindowMonitorLinkRow = {
+  maintenance_window_id: number;
+  monitor_id: number;
+};
+
+async function listMaintenanceWindowMonitorIdsByWindowId(
+  db: D1Database,
+  windowIds: number[],
+): Promise<Map<number, number[]>> {
+  const byWindow = new Map<number, number[]>();
+  if (windowIds.length === 0) return byWindow;
+
+  const placeholders = windowIds.map((_, idx) => `?${idx + 1}`).join(', ');
+  const sql = `
+    SELECT maintenance_window_id, monitor_id
+    FROM maintenance_window_monitors
+    WHERE maintenance_window_id IN (${placeholders})
+    ORDER BY maintenance_window_id, monitor_id
+  `;
+
+  const { results } = await db.prepare(sql).bind(...windowIds).all<MaintenanceWindowMonitorLinkRow>();
+  for (const r of results ?? []) {
+    const existing = byWindow.get(r.maintenance_window_id) ?? [];
+    existing.push(r.monitor_id);
+    byWindow.set(r.maintenance_window_id, existing);
+  }
+
+  return byWindow;
+}
+
+async function listMaintenanceWindowsStartedBetween(
+  db: D1Database,
+  startInclusive: number,
+  endInclusive: number,
+): Promise<MaintenanceWindowRow[]> {
+  if (endInclusive < startInclusive) return [];
+
+  const { results } = await db
+    .prepare(
+      `
+      SELECT id, title, message, starts_at, ends_at, created_at
+      FROM maintenance_windows
+      WHERE starts_at >= ?1 AND starts_at <= ?2
+      ORDER BY starts_at ASC, id ASC
+    `,
+    )
+    .bind(startInclusive, endInclusive)
+    .all<MaintenanceWindowRow>();
+
+  return results ?? [];
+}
+
+async function listMaintenanceWindowsEndedBetween(
+  db: D1Database,
+  startInclusive: number,
+  endInclusive: number,
+): Promise<MaintenanceWindowRow[]> {
+  if (endInclusive < startInclusive) return [];
+
+  const { results } = await db
+    .prepare(
+      `
+      SELECT id, title, message, starts_at, ends_at, created_at
+      FROM maintenance_windows
+      WHERE ends_at >= ?1 AND ends_at <= ?2
+      ORDER BY ends_at ASC, id ASC
+    `,
+    )
+    .bind(startInclusive, endInclusive)
+    .all<MaintenanceWindowRow>();
+
+  return results ?? [];
+}
+
+function maintenanceWindowRowToPayload(row: MaintenanceWindowRow, monitorIds: number[]) {
+  return {
+    id: row.id,
+    title: row.title,
+    message: row.message,
+    starts_at: row.starts_at,
+    ends_at: row.ends_at,
+    created_at: row.created_at,
+    monitor_ids: monitorIds,
+  };
 }
 
 function toHttpMethod(value: string | null): 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | null {
@@ -435,6 +539,76 @@ export async function runScheduledTick(env: Env, ctx: ExecutionContext): Promise
     return;
   }
 
+  const channels = await listActiveWebhookChannels(env.DB);
+  const notify: NotifyContext | null =
+    channels.length === 0 ? null : { ctx, envRecord: env as unknown as Record<string, unknown>, channels };
+
+  // Emit maintenance start/end notifications. This is best-effort and uses the existing
+  // notification_deliveries idempotency key to avoid duplicates.
+  if (notify) {
+    const lookbackStart = Math.max(0, now - MAINTENANCE_EVENT_LOOKBACK_SECONDS);
+
+    const started = await listMaintenanceWindowsStartedBetween(env.DB, lookbackStart, now);
+    const ended = await listMaintenanceWindowsEndedBetween(env.DB, lookbackStart, now);
+
+    const windowIds = [...new Set([...started.map((w) => w.id), ...ended.map((w) => w.id)])];
+    const monitorIdsByWindowId = await listMaintenanceWindowMonitorIdsByWindowId(env.DB, windowIds);
+
+    for (const w of started) {
+      const channelsForEvent = notify.channels.filter((c) => c.created_at <= w.starts_at);
+      if (channelsForEvent.length === 0) continue;
+
+      const eventType = 'maintenance.started';
+      const eventKey = `maintenance:${w.id}:started:${w.starts_at}`;
+      const payload = {
+        event: eventType,
+        event_id: eventKey,
+        timestamp: w.starts_at,
+        maintenance: maintenanceWindowRowToPayload(w, monitorIdsByWindowId.get(w.id) ?? []),
+      };
+
+      notify.ctx.waitUntil(
+        dispatchWebhookToChannels({
+          db: env.DB,
+          env: notify.envRecord,
+          channels: channelsForEvent,
+          eventType,
+          eventKey,
+          payload,
+        }).catch((err) => {
+          console.error('notify: failed to dispatch maintenance.started', err);
+        }),
+      );
+    }
+
+    for (const w of ended) {
+      const channelsForEvent = notify.channels.filter((c) => c.created_at <= w.ends_at);
+      if (channelsForEvent.length === 0) continue;
+
+      const eventType = 'maintenance.ended';
+      const eventKey = `maintenance:${w.id}:ended:${w.ends_at}`;
+      const payload = {
+        event: eventType,
+        event_id: eventKey,
+        timestamp: w.ends_at,
+        maintenance: maintenanceWindowRowToPayload(w, monitorIdsByWindowId.get(w.id) ?? []),
+      };
+
+      notify.ctx.waitUntil(
+        dispatchWebhookToChannels({
+          db: env.DB,
+          env: notify.envRecord,
+          channels: channelsForEvent,
+          eventType,
+          eventKey,
+          payload,
+        }).catch((err) => {
+          console.error('notify: failed to dispatch maintenance.ended', err);
+        }),
+      );
+    }
+  }
+
   const due = await listDueMonitors(env.DB, checkedAt);
   if (due.length === 0) {
     // Still refresh snapshots even if no monitors are due.
@@ -450,10 +624,6 @@ export async function runScheduledTick(env: Env, ctx: ExecutionContext): Promise
     );
     return;
   }
-
-  const channels = await listActiveWebhookChannels(env.DB);
-  const notify: NotifyContext | null =
-    channels.length === 0 ? null : { ctx, envRecord: env as unknown as Record<string, unknown>, channels };
 
   // Maintenance suppression is monitor-scoped.
   const suppressedMonitorIds = await listMaintenanceSuppressedMonitorIds(
