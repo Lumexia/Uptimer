@@ -51,6 +51,8 @@ function formatError(err: unknown): string | undefined {
 export function AdminDashboard() {
   const { logout } = useAuth();
   const queryClient = useQueryClient();
+  const invalidate = (queryKey: string | unknown[]) =>
+    queryClient.invalidateQueries({ queryKey: Array.isArray(queryKey) ? queryKey : [queryKey] });
   const [tab, setTab] = useState<Tab>('monitors');
   const [modal, setModal] = useState<ModalState>({ type: 'none' });
   const [testingMonitorId, setTestingMonitorId] = useState<number | null>(null);
@@ -71,11 +73,9 @@ export function AdminDashboard() {
     onSuccess: () => {
       invalidate('admin-settings');
       // Refresh public status so clients pick up the new level quickly.
-      invalidate(['status']);
+      invalidate('status');
     },
   });
-  const invalidate = (queryKey: string | unknown[]) =>
-    queryClient.invalidateQueries({ queryKey: Array.isArray(queryKey) ? queryKey : [queryKey] });
   const closeModal = () => setModal({ type: 'none' });
 
   const createMonitorMut = useMutation({ mutationFn: createMonitor, onSuccess: () => { invalidate('admin-monitors'); closeModal(); } });
