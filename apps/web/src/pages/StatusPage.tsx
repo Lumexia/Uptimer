@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { fetchLatency, fetchPublicMonitorOutages, fetchStatus } from '../api/client';
+import { fetchLatency, fetchPublicIncidents, fetchPublicMonitorOutages, fetchStatus } from '../api/client';
 import type { Incident, MonitorStatus, Outage, PublicMonitor, StatusResponse } from '../api/types';
 import { DayDowntimeModal } from '../components/DayDowntimeModal';
 import { Markdown } from '../components/Markdown';
@@ -416,6 +416,21 @@ export function StatusPage() {
     return all.filter((o) => o.started_at < dayEnd && (o.ended_at ?? dayEnd) > dayStart);
   }, [outagesQuery.data?.outages, selectedDay]);
 
+  const incidentsQuery = useInfiniteQuery({
+    queryKey: ['public-incidents'],
+    queryFn: ({ pageParam }) => {
+      const cursor = typeof pageParam === 'number' ? pageParam : undefined;
+      return fetchPublicIncidents(20, cursor);
+    },
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+  });
+
+  const resolvedIncidents = useMemo(() => {
+    const pages = incidentsQuery.data?.pages ?? [];
+    return pages.flatMap((p) => p.incidents).filter((it) => it.status === 'resolved');
+  }, [incidentsQuery.data]);
+
   if (statusQuery.isLoading) {
     return <StatusPageSkeleton />;
   }
@@ -601,6 +616,64 @@ export function StatusPage() {
           </section>
         )}
 
+        {/* Incident History */}
+        <section className="mb-10">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
+            <svg
+              className="w-5 h-5 text-slate-500 dark:text-slate-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+            Incident History
+          </h3>
+
+          {incidentsQuery.isLoading ? (
+            <Card className="p-6 text-center">
+              <p className="text-slate-500 dark:text-slate-400">Loading incidents…</p>
+            </Card>
+          ) : incidentsQuery.isError ? (
+            <Card className="p-6 text-center">
+              <p className="text-sm text-red-600 dark:text-red-400">Failed to load incident history</p>
+            </Card>
+          ) : resolvedIncidents.length > 0 ? (
+            <>
+              <div className="space-y-3">
+                {resolvedIncidents.map((it) => (
+                  <IncidentCard
+                    key={it.id}
+                    incident={it}
+                    timeZone={timeZone}
+                    onClick={() => setSelectedIncident(it)}
+                  />
+                ))}
+              </div>
+
+              {incidentsQuery.hasNextPage && (
+                <div className="mt-4">
+                  <button
+                    onClick={() => incidentsQuery.fetchNextPage()}
+                    disabled={incidentsQuery.isFetchingNextPage}
+                    className="px-3 py-2 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50"
+                  >
+                    {incidentsQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <Card className="p-6 text-center">
+              <p className="text-slate-500 dark:text-slate-400">No past incidents</p>
+            </Card>
+          )}
+        </section>
         {/* Monitors */}
         <section>
           <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">Services</h3>
