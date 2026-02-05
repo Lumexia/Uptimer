@@ -59,11 +59,20 @@ type DailyRollupRow = {
   uptime_sec: number;
 };
 
+type HeartbeatRow = {
+  monitor_id: number;
+  checked_at: number;
+  status: string;
+  latency_ms: number | null;
+};
+
 type BannerStatus = PublicStatusResponse['banner']['status'];
 
 type Banner = PublicStatusResponse['banner'];
 
 type MonitorStatus = PublicStatusResponse['overall_status'];
+
+type CheckStatus = PublicStatusResponse['monitors'][number]['heartbeats'][number]['status'];
 
 const STATUS_ACTIVE_INCIDENT_LIMIT = 5;
 const STATUS_ACTIVE_MAINTENANCE_LIMIT = 3;
@@ -71,12 +80,26 @@ const STATUS_UPCOMING_MAINTENANCE_LIMIT = 5;
 
 const UPTIME_DAYS = 30;
 
+const HEARTBEAT_POINTS = 60;
+
 function toMonitorStatus(value: string | null): MonitorStatus {
   switch (value) {
     case 'up':
     case 'down':
     case 'maintenance':
     case 'paused':
+    case 'unknown':
+      return value;
+    default:
+      return 'unknown';
+  }
+}
+
+function toCheckStatus(value: string | null): CheckStatus {
+  switch (value) {
+    case 'up':
+    case 'down':
+    case 'maintenance':
     case 'unknown':
       return value;
     default:
@@ -142,6 +165,49 @@ function maintenanceWindowRowToApi(row: MaintenanceWindowRow, monitorIds: number
     created_at: row.created_at,
     monitor_ids: monitorIds,
   } satisfies PublicStatusResponse['maintenance_windows']['active'][number];
+}
+
+async function listHeartbeatsByMonitorId(
+  db: D1Database,
+  monitorIds: number[],
+  limitPerMonitor: number,
+): Promise<Map<number, PublicStatusResponse['monitors'][number]['heartbeats']>> {
+  const byMonitor = new Map<number, PublicStatusResponse['monitors'][number]['heartbeats']>();
+
+  const ids = [...new Set(monitorIds)].filter((id) => Number.isFinite(id));
+  if (ids.length === 0) return byMonitor;
+
+  // Use a window function to cap each monitor partition to N rows.
+  // NOTE: check_results has an index (monitor_id, checked_at) to keep this efficient.
+  const placeholders = ids.map((_, idx) => `?${idx + 2}`).join(', ');
+  const sql = `
+    SELECT monitor_id, checked_at, status, latency_ms
+    FROM (
+      SELECT
+        id,
+        monitor_id,
+        checked_at,
+        status,
+        latency_ms,
+        ROW_NUMBER() OVER (
+          PARTITION BY monitor_id
+          ORDER BY checked_at DESC, id DESC
+        ) AS rn
+      FROM check_results
+      WHERE monitor_id IN (${placeholders})
+    )
+    WHERE rn <= ?1
+    ORDER BY monitor_id, checked_at DESC, id DESC
+  `;
+
+  const { results } = await db.prepare(sql).bind(limitPerMonitor, ...ids).all<HeartbeatRow>();
+  for (const r of results ?? []) {
+    const list = byMonitor.get(r.monitor_id) ?? [];
+    list.push({ checked_at: r.checked_at, status: toCheckStatus(r.status), latency_ms: r.latency_ms });
+    byMonitor.set(r.monitor_id, list);
+  }
+
+  return byMonitor;
 }
 
 async function listIncidentUpdatesByIncidentId(
@@ -416,6 +482,8 @@ export async function computePublicStatusPayload(db: D1Database, now: number): P
       last_checked_at: r.last_checked_at,
       last_latency_ms: isStale ? null : r.last_latency_ms,
 
+      heartbeats: [],
+
       uptime_30d: null,
       uptime_days: [],
     };
@@ -423,6 +491,11 @@ export async function computePublicStatusPayload(db: D1Database, now: number): P
 
   const ids = monitorsList.map((m) => m.id);
   if (ids.length > 0) {
+    const heartbeatsByMonitorId = await listHeartbeatsByMonitorId(db, ids, HEARTBEAT_POINTS);
+    for (const m of monitorsList) {
+      m.heartbeats = heartbeatsByMonitorId.get(m.id) ?? [];
+    }
+
     const placeholders = ids.map((_, idx) => `?${idx + 1}`).join(', ');
 
     const { results: rollupRows } = await db

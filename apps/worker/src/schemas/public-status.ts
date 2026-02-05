@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 const monitorStatusSchema = z.enum(['up', 'down', 'maintenance', 'paused', 'unknown']);
+const checkStatusSchema = z.enum(['up', 'down', 'maintenance', 'unknown']);
 
 const uptimeRatingLevelSchema = z.number().int().min(1).max(5);
 
@@ -56,6 +57,12 @@ const uptimeDaySchema = z.object({
   uptime_pct: z.number().min(0).max(100).nullable(),
 });
 
+const heartbeatSchema = z.object({
+  checked_at: z.number().int().nonnegative(),
+  status: checkStatusSchema,
+  latency_ms: z.number().int().nonnegative().nullable(),
+});
+
 const publicMonitorSchema = z.object({
   id: z.number().int().positive(),
   name: z.string(),
@@ -65,6 +72,9 @@ const publicMonitorSchema = z.object({
   is_stale: z.boolean(),
   last_checked_at: z.number().int().nonnegative().nullable(),
   last_latency_ms: z.number().int().nonnegative().nullable(),
+
+  // Last N checks (bounded in payload) for heartbeat bar.
+  heartbeats: z.array(heartbeatSchema).optional().default([]),
 
   // 30-day availability computed from daily rollups (UTC full days).
   uptime_30d: uptimeSummarySchema.nullable(),

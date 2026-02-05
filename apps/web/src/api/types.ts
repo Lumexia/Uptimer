@@ -75,6 +75,8 @@ export interface PublicMonitor {
   last_checked_at: number | null;
   last_latency_ms: number | null;
 
+  heartbeats: Heartbeat[];
+
   uptime_30d: UptimeSummary | null;
   uptime_days: UptimeDay[];
 }

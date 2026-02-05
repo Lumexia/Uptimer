@@ -6,6 +6,20 @@ interface HeartbeatBarProps {
   maxBars?: number;
 }
 
+function statusToAccessibleLabel(status: CheckStatus): string {
+  switch (status) {
+    case 'up':
+      return 'Up';
+    case 'down':
+      return 'Down';
+    case 'maintenance':
+      return 'Maintenance';
+    case 'unknown':
+    default:
+      return 'Unknown';
+  }
+}
+
 function getStatusColor(status: CheckStatus): string {
   switch (status) {
     case 'up':
@@ -83,6 +97,8 @@ export function HeartbeatBar({ heartbeats, maxBars = 60 }: HeartbeatBarProps) {
         {reversed.map((hb, idx) => (
           <div
             key={idx}
+            role="img"
+            aria-label={`${statusToAccessibleLabel(hb.status)} ${formatTime(hb.checked_at)}${hb.latency_ms !== null ? ` ${hb.latency_ms}ms` : ''}`}
             className={`flex-1 min-w-[3px] sm:min-w-[4px] max-w-[6px] sm:max-w-[8px] rounded-sm transition-all duration-150 cursor-pointer
               ${getStatusColor(hb.status)}
               hover:scale-y-110 hover:shadow-md ${tooltip?.heartbeat === hb ? getStatusGlow(hb.status) : ''}`}

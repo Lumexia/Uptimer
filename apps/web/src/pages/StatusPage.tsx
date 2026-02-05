@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { fetchLatency, fetchPublicDayContext, fetchPublicIncidents, fetchPublicMaintenanceWindows, fetchPublicMonitorOutages, fetchStatus } from '../api/client';
 import type { Incident, MaintenanceWindow, MonitorStatus, Outage, PublicMonitor, StatusResponse } from '../api/types';
 import { DayDowntimeModal } from '../components/DayDowntimeModal';
+import { HeartbeatBar } from '../components/HeartbeatBar';
 import { Markdown } from '../components/Markdown';
 import { UptimeBar30d } from '../components/UptimeBar30d';
 import { formatDateTime, formatTime } from '../utils/datetime';
@@ -111,6 +112,10 @@ function MonitorCard({ monitor, onSelect, onDayClick, timeZone }: { monitor: Pub
         timeZone={timeZone}
         onDayClick={onDayClick}
       />
+
+      <div className="mt-3 sm:mt-4">
+        <HeartbeatBar heartbeats={monitor.heartbeats ?? []} maxBars={60} />
+      </div>
 
       <div className="mt-3 sm:mt-4 flex flex-wrap items-center justify-between gap-2 text-sm">
         <div className="flex items-center gap-3 sm:gap-4">
