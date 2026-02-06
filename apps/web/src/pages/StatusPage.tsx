@@ -592,25 +592,6 @@ export function StatusPage() {
       </div>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
-        <section className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="p-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Monitors</div>
-            <div className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{data.monitors.length}</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Down</div>
-            <div className="mt-2 text-2xl font-semibold text-red-600 dark:text-red-400 tabular-nums">{data.summary.down}</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Active Incidents</div>
-            <div className="mt-2 text-2xl font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{activeIncidents.length}</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Active Maintenance</div>
-            <div className="mt-2 text-2xl font-semibold text-blue-600 dark:text-blue-400 tabular-nums">{data.maintenance_windows.active.length}</div>
-          </Card>
-        </section>
-
         {/* Maintenance Windows */}
         {(data.maintenance_windows.active.length > 0 || data.maintenance_windows.upcoming.length > 0) && (
           <section className="mb-10">
