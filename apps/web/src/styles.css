@@ -375,12 +375,17 @@ a {
     min-width: 44px;
   }
 
-  /* Smaller buttons in tables and bar charts */
+  /* Smaller buttons in tables */
   table button,
-  table a,
-  [data-bar-chart] button {
+  table a {
     min-height: 36px;
     min-width: auto;
+  }
+
+  /* Bar-chart cells use dense visual slots; avoid forcing tall tap targets that clip bars. */
+  [data-bar-chart] button {
+    min-height: 0;
+    min-width: 0;
   }
 }
 
