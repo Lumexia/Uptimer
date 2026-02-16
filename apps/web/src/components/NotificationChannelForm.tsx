@@ -95,24 +95,24 @@ export function NotificationChannelForm({ channel, onSubmit, onCancel, isLoading
     try {
       parsed = JSON.parse(trimmed) as unknown;
     } catch {
-      return { ok: false as const, error: 'Headers JSON must be valid JSON' };
+      return { ok: false as const, error: t('notification_form.error_headers_invalid_json') };
     }
 
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return {
         ok: false as const,
-        error: 'Headers JSON must be an object (e.g. {"Authorization":"Bearer ..."})',
+        error: t('notification_form.error_headers_must_object'),
       };
     }
 
     for (const [k, vv] of Object.entries(parsed as Record<string, unknown>)) {
       if (typeof vv !== 'string') {
-        return { ok: false as const, error: `Header "${k}" must be a string` };
+        return { ok: false as const, error: t('notification_form.error_header_value_string', { key: k }) };
       }
     }
 
     return { ok: true as const, value: parsed as Record<string, string> };
-  }, [headersJson]);
+  }, [headersJson, t]);
 
   const payloadTemplateParse = useMemo(() => {
     const trimmed = payloadTemplateJson.trim();
@@ -122,11 +122,11 @@ export function NotificationChannelForm({ channel, onSubmit, onCancel, isLoading
     try {
       parsed = JSON.parse(trimmed) as unknown;
     } catch {
-      return { ok: false as const, error: 'Payload template must be valid JSON' };
+      return { ok: false as const, error: t('notification_form.error_payload_template_invalid_json') };
     }
 
     return { ok: true as const, value: parsed };
-  }, [payloadTemplateJson]);
+  }, [payloadTemplateJson, t]);
 
   const canSubmit = headersParse.ok && payloadTemplateParse.ok;
 
@@ -186,7 +186,7 @@ export function NotificationChannelForm({ channel, onSubmit, onCancel, isLoading
         </div>
       )}
       <div>
-        <label className={labelClass}>Name</label>
+        <label className={labelClass}>{t('notification_form.name')}</label>
         <input
           type="text"
           value={name}
@@ -197,19 +197,19 @@ export function NotificationChannelForm({ channel, onSubmit, onCancel, isLoading
       </div>
 
       <div>
-        <label className={labelClass}>Webhook URL</label>
+        <label className={labelClass}>{t('notification_form.webhook_url')}</label>
         <input
           type="url"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://example.com/webhook"
+          placeholder={t('notification_form.webhook_url_placeholder')}
           className={inputClass}
           required
         />
       </div>
 
       <div>
-        <label className={labelClass}>Method</label>
+        <label className={labelClass}>{t('notification_form.method')}</label>
         <select value={method} onChange={(e) => setMethod(toMethod(e.target.value))} className={selectClass}>
           <option value="POST">POST</option>
           <option value="PUT">PUT</option>
@@ -221,21 +221,21 @@ export function NotificationChannelForm({ channel, onSubmit, onCancel, isLoading
       </div>
 
       <div>
-        <label className={labelClass}>Payload Type</label>
+        <label className={labelClass}>{t('notification_form.payload_type')}</label>
         <select
           value={payloadType}
           onChange={(e) => setPayloadType(toPayloadType(e.target.value))}
           className={selectClass}
         >
-          <option value="json">JSON</option>
-          <option value="param">Query params</option>
-          <option value="x-www-form-urlencoded">x-www-form-urlencoded</option>
+          <option value="json">{t('notification_form.payload_type_json')}</option>
+          <option value="param">{t('notification_form.payload_type_query')}</option>
+          <option value="x-www-form-urlencoded">{t('notification_form.payload_type_urlencoded')}</option>
         </select>
-        <div className={FIELD_HELP_CLASS}>Non-JSON types only support a flat key/value payload_template object.</div>
+        <div className={FIELD_HELP_CLASS}>{t('notification_form.payload_type_help')}</div>
       </div>
 
       <div>
-        <label className={labelClass}>Timeout (ms)</label>
+        <label className={labelClass}>{t('notification_form.timeout_ms')}</label>
         <input
           type="number"
           min={1}
@@ -247,34 +247,34 @@ export function NotificationChannelForm({ channel, onSubmit, onCancel, isLoading
       </div>
 
       <div>
-        <label className={labelClass}>Headers (JSON)</label>
+        <label className={labelClass}>{t('notification_form.headers_json')}</label>
         <textarea
           value={headersJson}
           onChange={(e) => setHeadersJson(e.target.value)}
           className={textareaClass}
           rows={4}
-          placeholder='{"Authorization":"Bearer $TOKEN"}'
+          placeholder={t('notification_form.headers_placeholder')}
         />
         {!headersParse.ok && (
           <div className="mt-1 text-xs text-red-600 dark:text-red-400">{headersParse.error}</div>
         )}
-        <div className={FIELD_HELP_CLASS}>Header values support magic variables like <code>{'{{message}}'}</code>.</div>
+        <div className={FIELD_HELP_CLASS}>{t('notification_form.headers_help')}</div>
       </div>
 
       <div>
-        <label className={labelClass}>Message Template (optional)</label>
+        <label className={labelClass}>{t('notification_form.message_template_optional')}</label>
         <textarea
           value={messageTemplate}
           onChange={(e) => setMessageTemplate(e.target.value)}
           className={textareaClass}
           rows={3}
-          placeholder="Monitor {{monitor.name}} changed to {{state.status}}\n$MSG"
+          placeholder={t('notification_form.message_template_placeholder')}
         />
-        <div className={FIELD_HELP_CLASS}>Available vars include: <code>{'{{event}}'}</code>, <code>{'{{event_id}}'}</code>, <code>{'{{monitor.name}}'}</code>, <code>{'{{state.error}}'}</code>, and <code>$MSG</code>.</div>
+        <div className={FIELD_HELP_CLASS}>{t('notification_form.message_template_help')}</div>
       </div>
 
       <div>
-        <label className={labelClass}>Payload Template (JSON, optional)</label>
+        <label className={labelClass}>{t('notification_form.payload_template_optional')}</label>
         <textarea
           value={payloadTemplateJson}
           onChange={(e) => setPayloadTemplateJson(e.target.value)}
@@ -282,18 +282,18 @@ export function NotificationChannelForm({ channel, onSubmit, onCancel, isLoading
           rows={8}
           placeholder={
             payloadType === 'json'
-              ? '{"text":"{{message}}","event":"{{event}}","monitor":"{{monitor.name}}"}'
-              : '{"text":"{{message}}","event":"{{event}}"}'
+              ? t('notification_form.payload_template_placeholder_json')
+              : t('notification_form.payload_template_placeholder_flat')
           }
         />
         {!payloadTemplateParse.ok && (
           <div className="mt-1 text-xs text-red-600 dark:text-red-400">{payloadTemplateParse.error}</div>
         )}
-        <div className={FIELD_HELP_CLASS}>Strings inside the template support <code>{'{{...}}'}</code> and <code>$MSG</code>.</div>
+        <div className={FIELD_HELP_CLASS}>{t('notification_form.payload_template_help')}</div>
       </div>
 
       <div>
-        <label className={labelClass}>Enabled Events (optional)</label>
+        <label className={labelClass}>{t('notification_form.enabled_events_optional')}</label>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {allEvents.map((ev) => (
             <label
@@ -309,7 +309,7 @@ export function NotificationChannelForm({ channel, onSubmit, onCancel, isLoading
             </label>
           ))}
         </div>
-        <div className={FIELD_HELP_CLASS}>Leave empty to send all events.</div>
+        <div className={FIELD_HELP_CLASS}>{t('notification_form.enabled_events_help')}</div>
       </div>
 
       <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
@@ -319,17 +319,17 @@ export function NotificationChannelForm({ channel, onSubmit, onCancel, isLoading
             checked={signingEnabled}
             onChange={(e) => setSigningEnabled(e.target.checked)}
           />
-          <span>Enable signing (HMAC-SHA256)</span>
+          <span>{t('notification_form.signing_enable')}</span>
         </label>
         {signingEnabled && (
           <div className="mt-3">
-            <label className={labelClass}>Signing Secret Ref</label>
+            <label className={labelClass}>{t('notification_form.signing_secret_ref')}</label>
             <input
               type="text"
               value={signingSecretRef}
               onChange={(e) => setSigningSecretRef(e.target.value)}
               className={inputClass}
-              placeholder="UPTIMER_WEBHOOK_SIGNING_SECRET"
+              placeholder={t('notification_form.signing_secret_ref_placeholder')}
               required
             />
           </div>

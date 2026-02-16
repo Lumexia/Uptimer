@@ -59,7 +59,7 @@ import {
   cn,
 } from '../components/ui';
 import { incidentImpactLabel, incidentStatusLabel, statusLabel } from '../i18n/labels';
-import { localeLabels } from '../i18n/messages';
+import { localeLabels, messages } from '../i18n/messages';
 import { formatDateTime } from '../utils/datetime';
 
 type Tab = 'monitors' | 'notifications' | 'incidents' | 'maintenance' | 'settings';
@@ -113,6 +113,15 @@ type MonitorGroupMeta = {
 
 const GROUP_ORDER_STEP = 10;
 const UNGROUPED_LABEL = 'Ungrouped';
+const UNGROUPED_LABEL_ALIASES = [
+  UNGROUPED_LABEL,
+  ...new Set(
+    Object.values(messages).map(
+      (localeMessages) =>
+        localeMessages['status_page.group_ungrouped'] ?? messages.en['status_page.group_ungrouped'],
+    ),
+  ),
+];
 const ALL_GROUPS_FILTER = '__all_groups__';
 
 const navActionClass =
@@ -187,9 +196,17 @@ function monitorGroupLabel(monitor: Pick<AdminMonitor, 'group_name'>): string {
   return trimmed.length > 0 ? trimmed : UNGROUPED_LABEL;
 }
 
-function normalizeGroupInput(value: string): string | null {
+function displayGroupLabel(groupLabel: string, ungroupedLabel: string): string {
+  return groupLabel === UNGROUPED_LABEL ? ungroupedLabel : groupLabel;
+}
+
+function normalizeGroupInput(value: string, ungroupedLabel: string): string | null {
   const trimmed = value.trim();
-  if (!trimmed || trimmed.localeCompare(UNGROUPED_LABEL, undefined, { sensitivity: 'base' }) === 0) {
+  if (!trimmed) {
+    return null;
+  }
+  const aliases = [ungroupedLabel, ...UNGROUPED_LABEL_ALIASES];
+  if (aliases.some((alias) => trimmed.localeCompare(alias, undefined, { sensitivity: 'base' }) === 0)) {
     return null;
   }
   return trimmed;
@@ -217,6 +234,7 @@ function compareMonitors(
   b: AdminMonitor,
   mode: MonitorSortMode,
   direction: MonitorSortDirection,
+  ungroupedLabel: string,
 ): number {
   const dir = direction === 'asc' ? 1 : -1;
   let cmp = 0;
@@ -225,9 +243,13 @@ function compareMonitors(
     case 'configured':
       cmp = a.group_sort_order - b.group_sort_order;
       if (cmp === 0) {
-        cmp = monitorGroupLabel(a).localeCompare(monitorGroupLabel(b), undefined, {
+        cmp = displayGroupLabel(monitorGroupLabel(a), ungroupedLabel).localeCompare(
+          displayGroupLabel(monitorGroupLabel(b), ungroupedLabel),
+          undefined,
+          {
           sensitivity: 'base',
-        });
+          },
+        );
       }
       if (cmp === 0) {
         cmp = a.sort_order - b.sort_order;
@@ -257,6 +279,7 @@ export function AdminDashboard() {
   const { logout } = useAuth();
   const { setLocaleSetting, t } = useI18n();
   const queryClient = useQueryClient();
+  const ungroupedLabel = t('status_page.group_ungrouped');
   const [tab, setTab] = useState<Tab>('monitors');
   const [modal, setModal] = useState<ModalState>({ type: 'none' });
   const [testingMonitorId, setTestingMonitorId] = useState<number | null>(null);
@@ -268,7 +291,7 @@ export function AdminDashboard() {
   const [monitorGroupReorderError, setMonitorGroupReorderError] = useState<string | null>(null);
   const [monitorGroupManageError, setMonitorGroupManageError] = useState<string | null>(null);
   const [selectedMonitorIds, setSelectedMonitorIds] = useState<number[]>([]);
-  const [bulkTargetGroup, setBulkTargetGroup] = useState<string>(UNGROUPED_LABEL);
+  const [bulkTargetGroup, setBulkTargetGroup] = useState<string>('');
   const [bulkTargetGroupSortOrderInput, setBulkTargetGroupSortOrderInput] = useState<string>('');
   const [monitorSortMode, setMonitorSortMode] = useState<MonitorSortMode>('configured');
   const [monitorSortDirection, setMonitorSortDirection] = useState<MonitorSortDirection>('asc');
@@ -292,8 +315,8 @@ export function AdminDashboard() {
   const siteTitle = settings?.site_title?.trim() || 'Uptimer';
 
   useEffect(() => {
-    document.title = `${siteTitle} · Admin`;
-  }, [siteTitle]);
+    document.title = `${siteTitle} · ${t('admin_dashboard.document_title_suffix')}`;
+  }, [siteTitle, t]);
 
   const [settingsDraft, setSettingsDraft] = useState<AdminSettings | null>(null);
   const [focusedSetting, setFocusedSetting] = useState<keyof AdminSettings | null>(null);
@@ -463,7 +486,7 @@ export function AdminDashboard() {
       setMonitorTestError({
         monitorId,
         at: Math.floor(Date.now() / 1000),
-        message: formatError(err) ?? 'Failed to run monitor test',
+        message: formatError(err) ?? t('admin_dashboard.monitor_test_failed_default'),
       });
       setMonitorTestFeedback(null);
     },
@@ -506,7 +529,7 @@ export function AdminDashboard() {
       setChannelTestError({
         channelId,
         at: Math.floor(Date.now() / 1000),
-        message: formatError(err) ?? 'Failed to run webhook test',
+        message: formatError(err) ?? t('admin_dashboard.webhook_test_failed_default'),
       });
       setChannelTestFeedback(null);
     },
@@ -686,7 +709,7 @@ export function AdminDashboard() {
       setMonitorGroupReorderError(null);
     },
     onError: (err) => {
-      setMonitorGroupReorderError(formatError(err) ?? 'Failed to reorder groups');
+      setMonitorGroupReorderError(formatError(err) ?? t('admin_dashboard.reorder_groups_failed'));
     },
     onSuccess: async () => {
       setMonitorGroupReorderError(null);
@@ -699,7 +722,7 @@ export function AdminDashboard() {
       const monitorIds = [...new Set(selectedMonitorIds)];
       if (monitorIds.length === 0) return;
 
-      const targetGroupName = normalizeGroupInput(bulkTargetGroup);
+      const targetGroupName = normalizeGroupInput(bulkTargetGroup, ungroupedLabel);
       const sortOrderTrimmed = bulkTargetGroupSortOrderInput.trim();
       const parsedSortOrder =
         sortOrderTrimmed.length > 0 ? Number.parseInt(sortOrderTrimmed, 10) : undefined;
@@ -716,7 +739,7 @@ export function AdminDashboard() {
       setMonitorGroupManageError(null);
     },
     onError: (err) => {
-      setMonitorGroupManageError(formatError(err) ?? 'Failed to move selected monitors');
+      setMonitorGroupManageError(formatError(err) ?? t('admin_dashboard.move_selected_failed'));
     },
     onSuccess: async () => {
       setMonitorGroupManageError(null);
@@ -751,7 +774,7 @@ export function AdminDashboard() {
         }
       }
 
-      return compareMonitors(a, b, monitorSortMode, monitorSortDirection);
+      return compareMonitors(a, b, monitorSortMode, monitorSortDirection, ungroupedLabel);
     });
     return list;
   }, [
@@ -760,6 +783,7 @@ export function AdminDashboard() {
     monitorSortDirection,
     monitorSortMode,
     monitorsQuery.data?.monitors,
+    ungroupedLabel,
   ]);
 
   const filteredMonitors = useMemo(() => {
@@ -787,6 +811,7 @@ export function AdminDashboard() {
     () => new Map((channelsQuery.data?.notification_channels ?? []).map((ch) => [ch.id, ch.name] as const)),
     [channelsQuery.data?.notification_channels],
   );
+  const toUiGroupLabel = (groupLabel: string) => displayGroupLabel(groupLabel, ungroupedLabel);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
@@ -959,9 +984,11 @@ export function AdminDashboard() {
                 <div className="order-2 space-y-4 self-start lg:order-1 lg:sticky lg:top-6">
                   <Card className="p-3 sm:p-4">
                     <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Group Manager</h3>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        {t('admin_dashboard.group_manager_title')}
+                      </h3>
                       <span className="text-xs text-slate-500 dark:text-slate-400">
-                        {orderedMonitorGroups.length} groups
+                        {t('admin_dashboard.group_manager_count', { count: orderedMonitorGroups.length })}
                       </span>
                     </div>
                     <div className="mt-3 space-y-2 lg:max-h-[42vh] lg:overflow-y-auto lg:pr-1">
@@ -975,7 +1002,7 @@ export function AdminDashboard() {
                             : 'border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700',
                         )}
                       >
-                        <span>All groups</span>
+                        <span>{t('admin_dashboard.group_all')}</span>
                         <span className="tabular-nums">{sortedMonitors.length}</span>
                       </button>
                       {orderedMonitorGroups.map((group, index) => {
@@ -989,7 +1016,7 @@ export function AdminDashboard() {
                               type="button"
                               onClick={() => {
                                 setMonitorGroupFilter(group.label);
-                                setBulkTargetGroup(group.label);
+                                setBulkTargetGroup(toUiGroupLabel(group.label));
                               }}
                               className={cn(
                                 'flex min-w-0 flex-1 items-center justify-between rounded-lg border px-2.5 py-2 text-left text-xs transition-colors',
@@ -998,7 +1025,7 @@ export function AdminDashboard() {
                                   : 'border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700',
                               )}
                             >
-                              <span className="truncate">{group.label}</span>
+                              <span className="truncate">{toUiGroupLabel(group.label)}</span>
                               <span className="ml-2 tabular-nums">
                                 {group.count} · {group.sortOrder}
                               </span>
@@ -1006,7 +1033,7 @@ export function AdminDashboard() {
                             <div className="flex shrink-0 items-center gap-1">
                               <button
                                 type="button"
-                                title="Move group up"
+                                title={t('admin_dashboard.group_move_up')}
                                 onClick={() => moveMonitorGroupMut.mutate({ groupLabel: group.label, direction: -1 })}
                                 disabled={isFirst || moveMonitorGroupMut.isPending}
                                 className="rounded border border-slate-300 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
@@ -1015,7 +1042,7 @@ export function AdminDashboard() {
                               </button>
                               <button
                                 type="button"
-                                title="Move group down"
+                                title={t('admin_dashboard.group_move_down')}
                                 onClick={() => moveMonitorGroupMut.mutate({ groupLabel: group.label, direction: 1 })}
                                 disabled={isLast || moveMonitorGroupMut.isPending}
                                 className="rounded border border-slate-300 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
@@ -1028,29 +1055,35 @@ export function AdminDashboard() {
                       })}
                     </div>
                     <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                      Tip: click a group to filter table rows and prefill side actions.
+                      {t('admin_dashboard.group_tip')}
                     </div>
                   </Card>
 
                   <Card className="p-3 sm:p-4">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Bulk Assign</h3>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      {t('admin_dashboard.bulk_assign_title')}
+                    </h3>
                     <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                      Selected monitors: {selectedMonitorIds.length}
+                      {t('admin_dashboard.bulk_assign_selected', { count: selectedMonitorIds.length })}
                     </div>
                     <div className="mt-3 space-y-3">
                       <div>
-                        <label className="text-xs text-slate-500 dark:text-slate-400">Target group</label>
+                        <label className="text-xs text-slate-500 dark:text-slate-400">
+                          {t('admin_dashboard.bulk_assign_target_group')}
+                        </label>
                         <input
                           type="text"
                           value={bulkTargetGroup}
                           onChange={(e) => setBulkTargetGroup(e.target.value)}
                           list="monitor-groups-datalist"
                           className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 focus:border-slate-400 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                          placeholder={UNGROUPED_LABEL}
+                          placeholder={ungroupedLabel}
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-slate-500 dark:text-slate-400">Target group order</label>
+                        <label className="text-xs text-slate-500 dark:text-slate-400">
+                          {t('admin_dashboard.bulk_assign_target_group_order')}
+                        </label>
                         <input
                           type="number"
                           value={bulkTargetGroupSortOrderInput}
@@ -1058,7 +1091,7 @@ export function AdminDashboard() {
                           min={-100000}
                           max={100000}
                           className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 focus:border-slate-400 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                          placeholder="keep current"
+                          placeholder={t('admin_dashboard.bulk_assign_target_group_order_placeholder')}
                         />
                       </div>
                       <Button
@@ -1068,8 +1101,8 @@ export function AdminDashboard() {
                         className="w-full"
                       >
                         {assignSelectedMonitorsMut.isPending
-                          ? 'Applying...'
-                          : `Move ${selectedMonitorIds.length} selected`}
+                          ? t('admin_dashboard.bulk_assign_apply_pending')
+                          : t('admin_dashboard.bulk_assign_apply', { count: selectedMonitorIds.length })}
                       </Button>
                       {selectedMonitorIds.length > 0 && (
                         <button
@@ -1077,12 +1110,12 @@ export function AdminDashboard() {
                           onClick={() => setSelectedMonitorIds([])}
                           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
                         >
-                          Clear selection
+                          {t('admin_dashboard.bulk_assign_clear')}
                         </button>
                       )}
                     </div>
                     <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                      Leave empty or use &quot;{UNGROUPED_LABEL}&quot; to ungroup.
+                      {t('admin_dashboard.bulk_assign_help', { label: ungroupedLabel })}
                     </div>
                   </Card>
 
@@ -1098,7 +1131,7 @@ export function AdminDashboard() {
                   )}
 
                   <datalist id="monitor-groups-datalist">
-                    <option value={UNGROUPED_LABEL} />
+                    <option value={ungroupedLabel} />
                     {monitorGroupLabels
                       .filter((label) => label !== UNGROUPED_LABEL)
                       .map((label) => (
@@ -1112,58 +1145,68 @@ export function AdminDashboard() {
                     <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                       <div className="order-1 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                         <label className="text-xs text-slate-500 dark:text-slate-400">
-                          <span className="mb-1 block">Group</span>
+                          <span className="mb-1 block">{t('common.group')}</span>
                           <select
                             value={monitorGroupMode}
                             onChange={(e) => setMonitorGroupMode(e.target.value as MonitorGroupMode)}
                             className="ui-select mt-1 block w-full"
                           >
-                            <option value="grouped">By group</option>
-                            <option value="flat">Flat list</option>
+                            <option value="grouped">{t('admin_dashboard.monitor_group_mode_grouped')}</option>
+                            <option value="flat">{t('admin_dashboard.monitor_group_mode_flat')}</option>
                           </select>
                         </label>
                         <label className="text-xs text-slate-500 dark:text-slate-400">
-                          <span className="mb-1 block">Sort</span>
+                          <span className="mb-1 block">{t('common.sort')}</span>
                           <select
                             value={monitorSortMode}
                             onChange={(e) => setMonitorSortMode(e.target.value as MonitorSortMode)}
                             className="ui-select mt-1 block w-full"
                           >
-                            <option value="configured">Configured order</option>
-                            <option value="status">Status</option>
-                            <option value="name">Name</option>
-                            <option value="last_checked_at">Last check</option>
-                            <option value="created_at">Created time</option>
+                            <option value="configured">{t('admin_dashboard.monitor_sort_mode_configured')}</option>
+                            <option value="status">{t('common.state')}</option>
+                            <option value="name">{t('common.name')}</option>
+                            <option value="last_checked_at">{t('admin_dashboard.monitor_sort_mode_last_check')}</option>
+                            <option value="created_at">{t('admin_dashboard.monitor_sort_mode_created_time')}</option>
                           </select>
                         </label>
                         <label className="text-xs text-slate-500 dark:text-slate-400 sm:col-span-2 xl:col-span-1">
-                          <span className="mb-1 block">Direction</span>
+                          <span className="mb-1 block">{t('common.direction')}</span>
                           <select
                             value={monitorSortDirection}
                             onChange={(e) => setMonitorSortDirection(e.target.value as MonitorSortDirection)}
                             className="ui-select mt-1 block w-full"
                           >
-                            <option value="asc">Asc</option>
-                            <option value="desc">Desc</option>
+                            <option value="asc">{t('common.asc')}</option>
+                            <option value="desc">{t('common.desc')}</option>
                           </select>
                         </label>
                       </div>
                       <div className="order-2 text-xs text-slate-500 dark:text-slate-400 xl:text-right">
-                        Showing {filteredMonitors.length} of {sortedMonitors.length} monitors
+                        {t('admin_dashboard.monitor_list_summary', {
+                          filtered: filteredMonitors.length,
+                          total: sortedMonitors.length,
+                        })}
                         {monitorGroupFilter !== ALL_GROUPS_FILTER && (
                           <>
                             {' '}
-                            in <span className="font-semibold text-slate-700 dark:text-slate-200">{monitorGroupFilter}</span>
+                            <span className="font-semibold text-slate-700 dark:text-slate-200">
+                              {t('admin_dashboard.monitor_list_summary_in_group', {
+                                group: toUiGroupLabel(monitorGroupFilter),
+                              })}
+                            </span>
                           </>
                         )}
-                        {' · '}selected {selectedMonitorIds.length}
+                        {' · '}
+                        {t('admin_dashboard.monitor_list_summary_selected', {
+                          count: selectedMonitorIds.length,
+                        })}
                       </div>
                     </div>
                   </Card>
 
                   {filteredMonitors.length === 0 ? (
                     <Card className="p-6 sm:p-8 text-center text-slate-500 dark:text-slate-400">
-                      No monitors in this group.
+                      {t('admin_dashboard.monitor_empty_in_group')}
                     </Card>
                   ) : (
                     <Card className="overflow-hidden">
@@ -1191,20 +1234,20 @@ export function AdminDashboard() {
                                       return [...next];
                                     });
                                   }}
-                                  aria-label="Select visible monitors"
+                                  aria-label={t('admin_dashboard.monitor_select_visible')}
                                   className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
                                 />
                               </th>
-                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Name</th>
-                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Group</th>
-                              <th className="hidden px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide lg:table-cell">Group Order</th>
-                              <th className="hidden px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide lg:table-cell">Monitor Order</th>
-                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Type</th>
-                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Target</th>
-                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Status</th>
-                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Last Check</th>
-                              <th className="hidden px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide xl:table-cell">Last Error</th>
-                              <th className="px-3 sm:px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Actions</th>
+                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">{t('common.name')}</th>
+                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">{t('common.group')}</th>
+                              <th className="hidden px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide lg:table-cell">{t('admin_dashboard.monitor_table_group_order')}</th>
+                              <th className="hidden px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide lg:table-cell">{t('admin_dashboard.monitor_table_monitor_order')}</th>
+                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">{t('common.type')}</th>
+                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">{t('common.target')}</th>
+                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">{t('common.state')}</th>
+                              <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">{t('admin_dashboard.monitor_table_last_check')}</th>
+                              <th className="hidden px-3 sm:px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide xl:table-cell">{t('admin_dashboard.monitor_table_last_error')}</th>
+                              <th className="px-3 sm:px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">{t('common.actions')}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -1223,8 +1266,11 @@ export function AdminDashboard() {
                                         colSpan={11}
                                         className="px-3 sm:px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300"
                                       >
-                                        {groupLabel} ({monitorCountsByGroup.get(groupLabel) ?? 0}) · order{' '}
-                                        {groupMeta?.sortOrder ?? 0}
+                                        {t('admin_dashboard.monitor_group_header', {
+                                          group: toUiGroupLabel(groupLabel),
+                                          count: monitorCountsByGroup.get(groupLabel) ?? 0,
+                                          order: groupMeta?.sortOrder ?? 0,
+                                        })}
                                       </td>
                                     </tr>
                                   )}
@@ -1239,12 +1285,12 @@ export function AdminDashboard() {
                                             return [...prev, m.id];
                                           });
                                         }}
-                                        aria-label={`Select ${m.name}`}
+                                        aria-label={t('admin_dashboard.monitor_select_row', { name: m.name })}
                                         className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
                                       />
                                     </td>
                                     <td className="px-3 sm:px-4 py-3 text-sm font-medium text-slate-900 dark:text-slate-100">{m.name}</td>
-                                    <td className="px-3 sm:px-4 py-3 text-xs text-slate-600 dark:text-slate-300">{groupLabel}</td>
+                                    <td className="px-3 sm:px-4 py-3 text-xs text-slate-600 dark:text-slate-300">{toUiGroupLabel(groupLabel)}</td>
                                     <td className="hidden px-3 sm:px-4 py-3 text-xs text-slate-500 dark:text-slate-400 tabular-nums lg:table-cell">{m.group_sort_order}</td>
                                     <td className="hidden px-3 sm:px-4 py-3 text-xs text-slate-500 dark:text-slate-400 tabular-nums lg:table-cell">{m.sort_order}</td>
                                     <td className="px-3 sm:px-4 py-3">
@@ -1383,7 +1429,11 @@ export function AdminDashboard() {
                           : 'unknown'
                     }
                   >
-                    {channelTestFeedback.delivery?.status ?? t('admin_dashboard.webhook_test_unknown')}
+                    {channelTestFeedback.delivery?.status === 'success'
+                      ? t('admin_dashboard.webhook_test_status_success')
+                      : channelTestFeedback.delivery?.status === 'failed'
+                        ? t('admin_dashboard.webhook_test_status_failed')
+                        : t('admin_dashboard.webhook_test_unknown')}
                   </Badge>
                 </div>
                 <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -1405,8 +1455,8 @@ export function AdminDashboard() {
                   {channelTestFeedback.delivery?.error
                     ? channelTestFeedback.delivery.error
                     : channelTestFeedback.delivery
-                      ? 'Delivery recorded successfully'
-                      : 'No delivery row returned by API'}
+                      ? t('admin_dashboard.webhook_delivery_success')
+                      : t('admin_dashboard.webhook_delivery_missing')}
                 </div>
               </Card>
             )}
@@ -1870,14 +1920,14 @@ export function AdminDashboard() {
                                 disabled={it.status === 'resolved'}
                                 className={cn(TABLE_ACTION_BUTTON_CLASS, 'text-blue-600 hover:bg-blue-50 hover:text-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/20 dark:hover:text-blue-300 disabled:opacity-50')}
                               >
-                                Update
+                                {t('common.update')}
                               </button>
                               <button
                                 onClick={() => setModal({ type: 'resolve-incident', incident: it })}
                                 disabled={it.status === 'resolved'}
                                 className={cn(TABLE_ACTION_BUTTON_CLASS, 'text-emerald-600 hover:bg-emerald-50 hover:text-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-300 disabled:opacity-50')}
                               >
-                                Resolve
+                                {t('resolve_incident.resolve')}
                               </button>
                               <button
                                 onClick={() => confirm(`${t('common.delete')} "${it.title}"?`) && deleteIncidentMut.mutate(it.id)}
