@@ -19,22 +19,38 @@ export function DailyLatencyChart({ points, height = 220 }: DailyLatencyChartPro
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
 
-  const data = points
-    .filter((p) => typeof p.p95_latency_ms === 'number')
+  const rawData = points
+    .filter(
+      (p): p is MonitorAnalyticsDayPoint & { p95_latency_ms: number } =>
+        typeof p.p95_latency_ms === 'number',
+    )
     .map((p) => ({
       day: p.day_start_at,
       p95_latency_ms: p.p95_latency_ms,
       p50_latency_ms: p.p50_latency_ms,
     }));
   const axisCeiling = suggestLatencyAxisCeiling(
-    data.flatMap((point) => [point.p95_latency_ms, point.p50_latency_ms]).filter(
-      (value): value is number => typeof value === 'number',
-    ),
+    rawData
+      .flatMap((point) => [point.p95_latency_ms, point.p50_latency_ms])
+      .filter((value): value is number => typeof value === 'number'),
   );
+  const data = rawData.map((point) => ({
+    ...point,
+    p95_latency_plot:
+      axisCeiling !== null && point.p95_latency_ms > axisCeiling ? null : point.p95_latency_ms,
+    p50_latency_plot:
+      axisCeiling !== null &&
+      typeof point.p50_latency_ms === 'number' &&
+      point.p50_latency_ms > axisCeiling
+        ? null
+        : point.p50_latency_ms,
+  }));
   const yAxisDomainProps =
-    axisCeiling === null ? {} : { domain: [0, axisCeiling] as [number, number] };
+    axisCeiling === null
+      ? {}
+      : { domain: [0, axisCeiling] as [number, number], allowDataOverflow: true };
 
-  if (data.length === 0) {
+  if (rawData.length === 0) {
     return (
       <div className="flex items-center justify-center h-[220px] text-slate-500 dark:text-slate-400">
         {t('common.no_latency_data')}
@@ -63,7 +79,17 @@ export function DailyLatencyChart({ points, height = 220 }: DailyLatencyChartPro
         />
         <Tooltip
           labelFormatter={(v) => new Date(Number(v) * 1000).toLocaleDateString()}
-          formatter={(v: number, name) => [`${v}ms`, name === 'p50_latency_ms' ? 'P50' : 'P95']}
+          formatter={(_value: number, name, item: unknown) => {
+            const payload = (
+              item as { payload?: { p50_latency_ms?: number; p95_latency_ms?: number } }
+            ).payload;
+            const rawLatency =
+              name === 'p50_latency_plot' ? payload?.p50_latency_ms : payload?.p95_latency_ms;
+            return [
+              typeof rawLatency === 'number' ? `${rawLatency}ms` : '-',
+              name === 'p50_latency_plot' ? 'P50' : 'P95',
+            ];
+          }}
           contentStyle={{
             backgroundColor: isDark ? '#1e293b' : '#ffffff',
             borderColor: isDark ? '#334155' : '#e2e8f0',
@@ -73,17 +99,19 @@ export function DailyLatencyChart({ points, height = 220 }: DailyLatencyChartPro
         />
         <Line
           type="monotone"
-          dataKey="p95_latency_ms"
+          dataKey="p95_latency_plot"
           stroke={p95Color}
           strokeWidth={2}
           dot={false}
+          connectNulls
         />
         <Line
           type="monotone"
-          dataKey="p50_latency_ms"
+          dataKey="p50_latency_plot"
           stroke={p50Color}
           strokeWidth={1}
           dot={false}
+          connectNulls
         />
       </LineChart>
     </ResponsiveContainer>

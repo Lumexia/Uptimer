@@ -18,17 +18,23 @@ export function LatencyChart({ points, height = 200 }: LatencyChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
 
-  const data = points
+  const rawData = points
     .filter((p) => p.status === 'up' && p.latency_ms !== null)
     .map((p) => ({
       time: p.checked_at,
       latency: p.latency_ms as number,
     }));
-  const axisCeiling = suggestLatencyAxisCeiling(data.map((point) => point.latency));
+  const axisCeiling = suggestLatencyAxisCeiling(rawData.map((point) => point.latency));
+  const data = rawData.map((point) => ({
+    ...point,
+    latency_plot: axisCeiling !== null && point.latency > axisCeiling ? null : point.latency,
+  }));
   const yAxisDomainProps =
-    axisCeiling === null ? {} : { domain: [0, axisCeiling] as [number, number] };
+    axisCeiling === null
+      ? {}
+      : { domain: [0, axisCeiling] as [number, number], allowDataOverflow: true };
 
-  if (data.length === 0) {
+  if (rawData.length === 0) {
     return (
       <div className="flex items-center justify-center h-[200px] text-slate-500 dark:text-slate-400">
         {t('common.no_latency_data')}
@@ -56,7 +62,13 @@ export function LatencyChart({ points, height = 200 }: LatencyChartProps) {
         />
         <Tooltip
           labelFormatter={(v) => new Date(Number(v) * 1000).toLocaleString()}
-          formatter={(v: number) => [`${v}ms`, t('admin_analytics.latency')]}
+          formatter={(_value: number, _name, item: unknown) => {
+            const rawLatency = (item as { payload?: { latency?: number } }).payload?.latency;
+            return [
+              typeof rawLatency === 'number' ? `${rawLatency}ms` : '-',
+              t('admin_analytics.latency'),
+            ];
+          }}
           contentStyle={{
             backgroundColor: isDark ? '#1e293b' : '#ffffff',
             borderColor: isDark ? '#334155' : '#e2e8f0',
@@ -64,7 +76,14 @@ export function LatencyChart({ points, height = 200 }: LatencyChartProps) {
             color: isDark ? '#f1f5f9' : '#0f172a',
           }}
         />
-        <Line type="monotone" dataKey="latency" stroke={lineColor} strokeWidth={2} dot={false} />
+        <Line
+          type="monotone"
+          dataKey="latency_plot"
+          stroke={lineColor}
+          strokeWidth={2}
+          dot={false}
+          connectNulls
+        />
       </LineChart>
     </ResponsiveContainer>
   );
