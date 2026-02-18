@@ -476,11 +476,15 @@ async function computeTodayPartialUptimeBatch(
       monitorRangeStart > rangeStart
         ? checks.filter((check) => check.checked_at >= monitorRangeStart)
         : checks;
-    const firstCheckAt = checksSinceMonitorStart.find(
-      (check) => check.checked_at >= monitorRangeStart,
-    )?.checked_at;
-    const effectiveRangeStart =
-      firstCheckAt ?? (monitor.last_checked_at === null ? null : monitorRangeStart);
+    let effectiveRangeStart: number | null = monitorRangeStart;
+
+    // Only newly created monitors should start their uptime window from the first observed probe.
+    // Existing monitors keep the requested range start so early-window UNKNOWN/DOWN time is preserved.
+    if (monitorRangeStart > rangeStart) {
+      const firstCheckAt = checksSinceMonitorStart[0]?.checked_at;
+      effectiveRangeStart =
+        firstCheckAt ?? (monitor.last_checked_at === null ? null : monitorRangeStart);
+    }
 
     if (effectiveRangeStart === null || now <= effectiveRangeStart) {
       out.set(id, {
@@ -505,9 +509,10 @@ async function computeTodayPartialUptimeBatch(
     );
     const downtime_sec = sumIntervals(downtimeIntervals);
 
-    const checksForUnknown = checksSinceMonitorStart.filter(
-      (check) => check.checked_at >= effectiveRangeStart,
-    );
+    const checksForUnknown =
+      effectiveRangeStart > monitorRangeStart
+        ? checksSinceMonitorStart.filter((check) => check.checked_at >= effectiveRangeStart)
+        : checksSinceMonitorStart;
     const unknownIntervals = buildUnknownIntervals(
       effectiveRangeStart,
       now,

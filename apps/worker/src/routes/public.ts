@@ -799,19 +799,26 @@ type OutageRow = { started_at: number; ended_at: number | null };
 function resolveUptimeRangeStart(
   rangeStart: number,
   rangeEnd: number,
+  monitorCreatedAt: number,
   lastCheckedAt: number | null,
   checks: Array<{ checked_at: number; status: string }>,
 ): number | null {
-  if (rangeEnd <= rangeStart) return null;
+  const monitorRangeStart = Math.max(rangeStart, monitorCreatedAt);
+  if (rangeEnd <= monitorRangeStart) return null;
 
-  const firstCheckAt = checks.find(
-    (check) => check.checked_at >= rangeStart && check.checked_at < rangeEnd,
-  )?.checked_at;
-  if (firstCheckAt !== undefined) {
-    return firstCheckAt;
+  // Start from the first observed probe only for monitors created inside this window.
+  if (monitorRangeStart > rangeStart) {
+    const firstCheckAt = checks.find(
+      (check) => check.checked_at >= monitorRangeStart && check.checked_at < rangeEnd,
+    )?.checked_at;
+    if (firstCheckAt !== undefined) {
+      return firstCheckAt;
+    }
+
+    return lastCheckedAt === null ? null : monitorRangeStart;
   }
 
-  return lastCheckedAt === null ? null : rangeStart;
+  return monitorRangeStart;
 }
 
 publicRoutes.get('/monitors/:id/uptime', async (c) => {
@@ -862,6 +869,7 @@ publicRoutes.get('/monitors/:id/uptime', async (c) => {
   const effectiveRangeStart = resolveUptimeRangeStart(
     rangeStart,
     rangeEnd,
+    monitor.created_at,
     monitor.last_checked_at,
     checks,
   );
@@ -905,11 +913,15 @@ publicRoutes.get('/monitors/:id/uptime', async (c) => {
   );
   const downtime_sec = sumIntervals(downtimeIntervals);
 
+  const checksForUnknown =
+    effectiveRangeStart > rangeStart
+      ? checks.filter((check) => check.checked_at >= effectiveRangeStart)
+      : checks;
   const unknownIntervals = buildUnknownIntervals(
     effectiveRangeStart,
     rangeEnd,
     monitor.interval_sec,
-    checks.filter((check) => check.checked_at >= effectiveRangeStart),
+    checksForUnknown,
   );
 
   // Unknown time is treated as "unavailable" per Application.md; exclude overlap with downtime to avoid double counting.
@@ -939,6 +951,7 @@ async function computePartialUptimeTotals(
   db: D1Database,
   monitorId: number,
   intervalSec: number,
+  createdAt: number,
   lastCheckedAt: number | null,
   rangeStart: number,
   rangeEnd: number,
@@ -963,7 +976,13 @@ async function computePartialUptimeTotals(
     .all<{ checked_at: number; status: string }>();
 
   const checks = (checkRows ?? []).map((r) => ({ checked_at: r.checked_at, status: toCheckStatus(r.status) }));
-  const effectiveRangeStart = resolveUptimeRangeStart(rangeStart, rangeEnd, lastCheckedAt, checks);
+  const effectiveRangeStart = resolveUptimeRangeStart(
+    rangeStart,
+    rangeEnd,
+    createdAt,
+    lastCheckedAt,
+    checks,
+  );
   if (effectiveRangeStart === null || rangeEnd <= effectiveRangeStart) {
     return { total_sec: 0, downtime_sec: 0, unknown_sec: 0, uptime_sec: 0 };
   }
@@ -993,11 +1012,15 @@ async function computePartialUptimeTotals(
   );
   const downtime_sec = sumIntervals(downtimeIntervals);
 
+  const checksForUnknown =
+    effectiveRangeStart > rangeStart
+      ? checks.filter((check) => check.checked_at >= effectiveRangeStart)
+      : checks;
   const unknownIntervals = buildUnknownIntervals(
     effectiveRangeStart,
     rangeEnd,
     intervalSec,
-    checks.filter((check) => check.checked_at >= effectiveRangeStart),
+    checksForUnknown,
   );
   const unknown_sec = Math.max(
     0,
@@ -1096,6 +1119,7 @@ publicRoutes.get('/analytics/uptime', async (c) => {
               c.env.DB,
               m.id,
               m.interval_sec,
+              m.created_at,
               m.last_checked_at,
               partialStart,
               partialEnd,
